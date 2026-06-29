@@ -4,6 +4,9 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 try:
     from langchain_core.prompts import PromptTemplate
@@ -14,9 +17,9 @@ except Exception:  # pragma: no cover
         PromptTemplate = None  # type: ignore
 
 try:
-    from openai import OpenAI
+    from groq import Groq
 except Exception:  # pragma: no cover
-    OpenAI = None  # type: ignore
+    Groq = None  # type: ignore
 
 
 @dataclass
@@ -46,22 +49,45 @@ class InMemoryRAG:
         return [resource for _, resource in scored[:k]]
 
 
-class OpenAILLM:
-    """OpenAI wrapper compatible with the mentor's generation interface."""
+class GroqLLM:
+    """Groq wrapper compatible with the mentor's generation interface."""
 
-    def __init__(self, model: str = "gpt-4o-mini", api_key: Optional[str] = None):
-        if OpenAI is None:
-            raise RuntimeError("openai package is not installed.")
+    def __init__(
+        self,
+        model: str = "llama-3.3-70b-versatile",
+        api_key: Optional[str] = None,
+    ):
+        if Groq is None:
+            raise RuntimeError("groq package is not installed.")
         self.model = model
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.client = Groq(api_key=api_key or os.getenv("GROQ_API_KEY"))
 
     def generate(self, prompt: str) -> str:
-        response = self.client.responses.create(
+        response = self.client.chat.completions.create(
             model=self.model,
-            input=prompt,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an adaptive AI learning mentor. "
+                        "Give clear explanations, examples, study tips, "
+                        "and end with one checkpoint question."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
             temperature=0.3,
+            max_tokens=1024,
         )
-        return response.output_text.strip()
+        content = response.choices[0].message.content
+
+        if content is None:
+            raise RuntimeError("Groq returned an empty response.")
+
+        return content.strip()
 
 
 class LearningMentor:
@@ -73,11 +99,11 @@ class LearningMentor:
 
     def _build_prompt(self, student_profile: Dict[str, Any], query: str, context: str) -> str:
         template = (
-            "You are a learning coach.\\n"
-            "Student profile: {student_profile}\\n"
-            "Weak areas: {weak_areas}\\n"
-            "Question: {query}\\n"
-            "Retrieved context: {context}\\n"
+            "You are a learning coach.\n"
+            "Student profile: {student_profile}\n"
+            "Weak areas: {weak_areas}\n"
+            "Question: {query}\n"
+            "Retrieved context: {context}\n"
             "Provide clear next steps, examples, and one checkpoint question."
         )
         weak_areas = ", ".join(student_profile.get("weak_areas", [])) or "None identified"
@@ -125,14 +151,25 @@ class LearningMentor:
         return quiz
 
     def generate_practice_questions(self, topic: str, n_questions: int = 5) -> List[str]:
-        return [f"Practice {i}: Solve a {topic} problem with step-by-step reasoning." for i in range(1, n_questions + 1)]
+        return [
+            f"Practice {i}: Solve a {topic} problem with step-by-step reasoning."
+            for i in range(1, n_questions + 1)
+        ]
 
-    def coach(self, query: str, student_profile: Dict[str, Any], quiz_scores: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    def coach(
+        self,
+        query: str,
+        student_profile: Dict[str, Any],
+        quiz_scores: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         quiz_scores = quiz_scores or []
         weak_areas = self.identify_weak_areas(quiz_scores)
         student_profile = {**student_profile, "weak_areas": weak_areas}
         retrieved = self.rag.retrieve(query)
-        context = "\n".join(f"- {doc.title}: {doc.content}" for doc in retrieved) or "No matching notes found."
+        context = (
+            "\n".join(f"- {doc.title}: {doc.content}" for doc in retrieved)
+            or "No matching notes found."
+        )
         prompt = self._build_prompt(student_profile, query, context)
 
         if self.llm is not None:
@@ -153,3 +190,4 @@ class LearningMentor:
             "prompt": prompt,
             "retrieved_context": context,
         }
+    

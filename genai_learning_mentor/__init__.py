@@ -1,5 +1,5 @@
 """GenAI Learning Mentor package."""
 
-from .mentor import InMemoryRAG, LearningMentor, OpenAILLM
+from .mentor import InMemoryRAG, LearningMentor, GroqLLM
 
-__all__ = ["InMemoryRAG", "LearningMentor", "OpenAILLM"]
+__all__ = ["InMemoryRAG", "LearningMentor", "GroqLLM"]
